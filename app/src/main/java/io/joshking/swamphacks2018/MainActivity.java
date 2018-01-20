@@ -84,9 +84,9 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Sets up member variables related to camera.
-     *
-//     * @param width  The width of available size for camera preview
-//     * @param height The height of available size for camera preview
+     * <p>
+     * //     * @param width  The width of available size for camera preview
+     * //     * @param height The height of available size for camera preview
      */
     private void setUpCameraOutputs(/*int width, int height*/) {
         try {
