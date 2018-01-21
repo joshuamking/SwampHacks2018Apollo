@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:layout_gravity="center">
+
+    <io.joshking.swamphacks2018.AutoFitTextureView
+        android:id="@+id/texture"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentTop="true"
+        android:keepScreenOn="true" />
+    <!--<LinearLayout-->
+    <!--android:orientation="vertical"-->
+    <!--xmlns:tools="http://schemas.android.com/tools"-->
+    <!--android:layout_width="match_parent"-->
+    <!--android:layout_height="match_parent"-->
+    <!--tools:context=".MainActivity$PlaceholderFragment">-->
+
+    <!--<ScrollView-->
+    <!--android:layout_height="0dp"-->
+    <!--android:layout_width="match_parent"-->
+    <!--android:layout_weight="1">-->
+
+    <!--<TextView-->
+    <!--android:id="@+id/messages"-->
+    <!--android:layout_width="wrap_content"-->
+    <!--android:layout_height="wrap_content" />-->
+
+    <!--</ScrollView>-->
+
+    <!--<LinearLayout-->
+    <!--android:layout_height="wrap_content"-->
+    <!--android:layout_width="match_parent"-->
+    <!--android:orientation="horizontal">-->
+
+    <!--<EditText-->
+    <!--android:id="@+id/messagetext"-->
+    <!--android:layout_height="wrap_content"-->
+    <!--android:layout_width="0dp"-->
+    <!--android:layout_weight="1"-->
+    <!--android:hint="Message"-->
+    <!--android:inputType="textShortMessage|textMultiLine|textCapSentences" />-->
+
+    <!--<Button-->
+    <!--android:layout_height="wrap_content"-->
+    <!--android:layout_width="wrap_content"-->
+    <!--android:layout_gravity="bottom"-->
+    <!--android:id="@+id/send_btn"-->
+    <!--android:text="Send" />-->
+
+    <!--</LinearLayout>-->
+
+    <!--</LinearLayout>-->
+</FrameLayout>
