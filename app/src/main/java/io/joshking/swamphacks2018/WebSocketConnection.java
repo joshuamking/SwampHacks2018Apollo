@@ -64,7 +64,14 @@ public class WebSocketConnection {
 
             @Override
             public void onMessage(String s) {
-                responseCallback.accept(s);
+                System.out.println("||||||||: " + s);
+                if (responseCallback != null) {
+                    try {
+                        responseCallback.accept(s);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
             }
 
             @Override

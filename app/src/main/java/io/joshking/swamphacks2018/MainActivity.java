@@ -20,7 +20,7 @@ public class MainActivity extends AppCompatActivity {
 
         mContentView = findViewById(R.id.root_view);
         getFragmentManager().beginTransaction()
-                .replace(R.id.root_view, Camera2BasicFragment.newInstance())
+                .replace(R.id.root_view, CameraFragment.newInstance())
                 .commit();
     }
 

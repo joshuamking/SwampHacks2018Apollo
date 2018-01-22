@@ -8,6 +8,8 @@ import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.Fragment;
 import android.content.pm.PackageManager;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 import android.os.VibrationEffect;
@@ -24,25 +26,20 @@ import android.widget.Toast;
 
 import java.io.File;
 
-public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnRequestPermissionsResultCallback {
+public class CameraFragment extends Fragment implements FragmentCompat.OnRequestPermissionsResultCallback {
 
     private static final int REQUEST_CAMERA_PERMISSION = 1;
     private static final String FRAGMENT_DIALOG = "dialog";
     private AutoFitTextureView textureView;
-    private CameraUtilsBare cameraUtils;
+    private CameraUtils cameraUtils;
     private WebSocketConnection connection;
     private Vibrator vibrator;
+    private SensorManager mSensorManager;
+    private Sensor mAccelerometer;
+    private ShakeDetector mShakeDetector;
 
-
-    public static Camera2BasicFragment newInstance() {
-        return new Camera2BasicFragment();
-    }
-
-    private void showToast(final String text) {
-        final Activity activity = getActivity();
-        if (activity != null) {
-            activity.runOnUiThread(() -> Toast.makeText(activity, text, Toast.LENGTH_SHORT).show());
-        }
+    public static CameraFragment newInstance() {
+        return new CameraFragment();
     }
 
     @Override
@@ -54,7 +51,7 @@ public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnR
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         textureView = view.findViewById(R.id.texture);
-        textureView.setOnClickListener(v -> vibrate());
+//        textureView.setOnClickListener(v -> vibrate());
     }
 
     @SuppressLint("MissingPermission")
@@ -65,23 +62,37 @@ public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnR
         Activity activity = getActivity();
 
         vibrator = activity.getSystemService(Vibrator.class);
+//        mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+//        mAccelerometer = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+//        mShakeDetector = new ShakeDetector();
+//        mShakeDetector.setOnShakeListener(count -> {
+//            /*
+//             * The following method, "handleShakeEvent(count):" is a stub //
+//             * method you would use to setup whatever you want done once the
+//             * device has been shook.
+//             */
+//            handleShakeEvent(count);
+//        });
+
         File file = new File(activity.getExternalFilesDir(null), "pic.jpg");
         CameraManager cameraManager = activity.getSystemService(CameraManager.class);
         Display display = activity.getWindowManager().getDefaultDisplay();
 
-        cameraUtils = new CameraUtilsBare(cameraManager, file, () -> display, () -> textureView, () -> {
+        cameraUtils = new CameraUtils(cameraManager, file, () -> display, () -> textureView, () -> {
             connection.sendFile(cameraUtils.getFile(), response -> {
                 cameraUtils.takePicture();
 
                 try {
-                    int probability = Integer.parseInt(response);
+                    response = response.trim();
+                    int probability = Math.round(Float.parseFloat(response));
                     handleProbabilityOfObject(probability);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             });
         });
-        connection = new WebSocketConnection("ws://10.192.134.211:8080", () -> {
+        connection = new WebSocketConnection("ws://10.192.182.83:8080", () -> {     //
+//        connection = new WebSocketConnection("ws://10.192.131.4:8080", () -> {        // George
             if (checkPermissions()) {
                 cameraUtils.init();
             } else {
@@ -92,8 +103,15 @@ public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnR
     }
 
     private void handleProbabilityOfObject(@IntRange(from = 0, to = 100) int probability) {
-        if (probability > 50)
+        if (probability > 70) {
             vibrate();
+        }
+        try {
+            getActivity().runOnUiThread(() ->
+                    Toast.makeText(getContext().getApplicationContext(), String.valueOf(probability), Toast.LENGTH_SHORT).show());
+        } catch (Exception e) {
+
+        }
     }
 
     private void vibrate() {
@@ -107,11 +125,9 @@ public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnR
         }
     }
 
-
     @Override
     public void onPause() {
         cameraUtils.closeCamera();
-//        stopBackgroundThread();
         super.onPause();
     }
 
@@ -143,23 +159,6 @@ public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnR
     private boolean checkPermissions() {
         return ContextCompat.checkSelfPermission(getActivity(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
     }
-//    private void startBackgroundThread() {
-//        mBackgroundThread = new HandlerThread("CameraBackground");
-//        mBackgroundThread.start();
-//        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
-//    }
-//
-//    private void stopBackgroundThread() {
-//        mBackgroundThread.quitSafely();
-//        try {
-//            mBackgroundThread.join();
-//            mBackgroundThread = null;
-//            mBackgroundHandler = null;
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//        }
-//    }
-
 
     public static class ErrorDialog extends DialogFragment {
 
@@ -185,9 +184,6 @@ public class Camera2BasicFragment extends Fragment implements FragmentCompat.OnR
 
     }
 
-    /**
-     * Shows OK/Cancel confirmation dialog about camera permission.
-     */
     public static class ConfirmationDialog extends DialogFragment {
 
         @Override

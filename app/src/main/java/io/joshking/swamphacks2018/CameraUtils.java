@@ -3,14 +3,15 @@ package io.joshking.swamphacks2018;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
-import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
@@ -18,10 +19,9 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Handler;
-import android.os.HandlerThread;
+import android.os.Looper;
 import android.support.annotation.NonNull;
 import android.support.annotation.RequiresPermission;
-import android.util.Log;
 import android.util.Size;
 import android.view.Display;
 import android.view.Surface;
@@ -31,11 +31,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -44,10 +42,8 @@ import java.util.function.Supplier;
  * Created by Joshua King on 1/20/18.
  */
 
-public class CameraUtils {
-    private static final int REQUEST_CAMERA_PERMISSION = 1;
-    private static final String FRAGMENT_DIALOG = "dialog";
-    private static final String TAG = "Camera2BasicFragment";
+class CameraUtils {
+    private static final String TAG = "CameraFragment";
     private static final int STATE_PREVIEW = 0;
     private static final int STATE_WAITING_LOCK = 1;
     private static final int STATE_WAITING_PRECAPTURE = 2;
@@ -55,16 +51,23 @@ public class CameraUtils {
     private static final int STATE_PICTURE_TAKEN = 4;
     private static final int MAX_PREVIEW_WIDTH = 1920;
     private static final int MAX_PREVIEW_HEIGHT = 1080;
+    private Handler handler = new Handler();
+    private Handler mBackgroundHandler = new Handler();
+    private File file;
+    private Runnable captureCompleted;
     private final ImageReader.OnImageAvailableListener mOnImageAvailableListener = reader -> {
-//            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+        Image image = null;
+        try {
+            image = reader.acquireNextImage();
+            mBackgroundHandler.post(new ImageSaver(image, file, captureCompleted));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     };
-    Handler handler = new Handler();
-    private String mCameraId;
-    private AutoFitTextureView mTextureView;
+    private String mCameraId = "0";
+    private Supplier<AutoFitTextureView> textureViewSupplier;
     private CameraCaptureSession mCaptureSession;
     private Size mPreviewSize;
-    private HandlerThread mBackgroundThread;
-    private Handler mBackgroundHandler;
     private ImageReader mImageReader;
     private CaptureRequest.Builder previewRequestBuilder;
     private CaptureRequest mPreviewRequest;
@@ -72,7 +75,6 @@ public class CameraUtils {
     private Semaphore mCameraOpenCloseLock = new Semaphore(1);
     private CameraDevice mCameraDevice;
     private CameraManager manager;
-    private Runnable captureCompleted;
     private CameraCaptureSession.CaptureCallback mCaptureCallback = new CameraCaptureSession.CaptureCallback() {
 
         private void process(CaptureResult result) {
@@ -93,8 +95,6 @@ public class CameraUtils {
                                 aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
                             mState = STATE_PICTURE_TAKEN;
                             captureStillPicture();
-                        } else {
-                            runPrecaptureSequence();
                         }
                     }
                     break;
@@ -172,6 +172,7 @@ public class CameraUtils {
 
         @Override
         public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) {
+            configureTransform(width, height);
         }
 
         @Override
@@ -184,46 +185,45 @@ public class CameraUtils {
         }
     };
 
-    public CameraUtils(CameraManager manager, Supplier<Display> displaySupplier) {
+    public CameraUtils(CameraManager manager, File file, Supplier<Display> displaySupplier, Supplier<AutoFitTextureView> textureViewSupplier, Runnable captureCompleted) {
         this.manager = manager;
+        this.file = file;
+        this.displaySupplier = displaySupplier;
+        this.textureViewSupplier = textureViewSupplier;
+        this.captureCompleted = captureCompleted;
     }
 
-    private static Size chooseOptimalSize(Size[] choices, int textureViewWidth,
-                                          int textureViewHeight, int maxWidth, int maxHeight, Size aspectRatio) {
+    private void configureTransform(int viewWidth, int viewHeight) {
+        AutoFitTextureView textureView = textureViewSupplier.get();
 
-        // Collect the supported resolutions that are at least as big as the preview Surface
-        List<Size> bigEnough = new ArrayList<>();
-        // Collect the supported resolutions that are smaller than the preview Surface
-        List<Size> notBigEnough = new ArrayList<>();
-        int w = aspectRatio.getWidth();
-        int h = aspectRatio.getHeight();
-        for (Size option : choices) {
-            if (option.getWidth() <= maxWidth && option.getHeight() <= maxHeight &&
-                    option.getHeight() == option.getWidth() * h / w) {
-                if (option.getWidth() >= textureViewWidth &&
-                        option.getHeight() >= textureViewHeight) {
-                    bigEnough.add(option);
-                } else {
-                    notBigEnough.add(option);
-                }
-            }
+        if (textureView == null || mPreviewSize == null) {
+            return;
         }
 
-        // Pick the smallest of those big enough. If there is no one big enough, pick the
-        // largest of those not big enough.
-        if (bigEnough.size() > 0) {
-            return Collections.min(bigEnough, new CompareSizesByArea());
-        } else if (notBigEnough.size() > 0) {
-            return Collections.max(notBigEnough, new CompareSizesByArea());
-        } else {
-            Log.e(TAG, "Couldn't find any suitable preview size");
-            return choices[0];
-        }
+//        Matrix matrix = new Matrix();
+//        RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
+//        RectF bufferRect = new RectF(0, 0, mPreviewSize.getHeight(), mPreviewSize.getWidth());
+//        float centerX = viewRect.centerX();
+//        float centerY = viewRect.centerY();
+//        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+//        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
+//        float scale = Math.max((float) viewHeight / mPreviewSize.getHeight(), (float) viewWidth / mPreviewSize.getWidth());
+//        matrix.postScale(scale, scale, centerX, centerY);
+//        matrix.postRotate(90 * (Surface.ROTATION_0 - 2), centerX, centerY);
+
+
+        Matrix matrix = new Matrix();
+        RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
+        float centerX = viewRect.centerX();
+        float centerY = viewRect.centerY();
+        matrix.postRotate(0, centerX, centerY);
+
+        textureView.setTransform(matrix);
     }
 
     private void createCameraPreviewSession() {
         try {
-            SurfaceTexture texture = mTextureView.getSurfaceTexture();
+            SurfaceTexture texture = textureViewSupplier.get().getSurfaceTexture();
             assert texture != null;
 
             texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
@@ -246,8 +246,7 @@ public class CameraUtils {
                                 previewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
                                 mPreviewRequest = previewRequestBuilder.build();
-                                mCaptureSession.setRepeatingRequest(mPreviewRequest,
-                                        mCaptureCallback, mBackgroundHandler);
+                                mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback, mBackgroundHandler);
                             } catch (CameraAccessException e) {
                                 e.printStackTrace();
                             }
@@ -260,19 +259,6 @@ public class CameraUtils {
                         }
                     }, null
             );
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void unlockFocus() {
-        try {
-            previewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
-            mCaptureSession.capture(previewRequestBuilder.build(), mCaptureCallback, mBackgroundHandler);
-
-            mState = STATE_PREVIEW;
-            mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback,
-                    mBackgroundHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -292,68 +278,35 @@ public class CameraUtils {
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
             // Rotation 0, 90,  180, or 270
-            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, 0);
+            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, 180);
 
             CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
                 @Override
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session,
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
-                    captureCompleted.run();
+                    // captureCompleted.run();
                 }
             };
 
-            mCaptureSession.stopRepeating();
-            mCaptureSession.capture(captureBuilder.build(), captureCallback, null);
+            mCaptureSession.capture(captureBuilder.build(), captureCallback, new Handler(Looper.getMainLooper()));
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
 
-    private void runPrecaptureSequence() {
-        try {
-            // This is how to tell the camera to trigger.
-            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
-                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
-            // Tell #mCaptureCallback to wait for the precapture sequence to be set.
-            mState = STATE_WAITING_PRECAPTURE;
-            mCaptureSession.capture(previewRequestBuilder.build(), mCaptureCallback,
-                    mBackgroundHandler);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void takePicture() {
-        lockFocus();
-    }
-
-    private void lockFocus() {
-        try {
-            // This is how to tell the camera to lock focus.
-            previewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                    CameraMetadata.CONTROL_AF_TRIGGER_START);
-            // Tell #mCaptureCallback to wait for the lock.
-            mState = STATE_WAITING_LOCK;
-            mCaptureSession.capture(previewRequestBuilder.build(), mCaptureCallback,
-                    mBackgroundHandler);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void closeCamera() {
+    public void closeCamera() {
         try {
             mCameraOpenCloseLock.acquire();
-            if (null != mCaptureSession) {
+            if (mCaptureSession != null) {
                 mCaptureSession.close();
                 mCaptureSession = null;
             }
-            if (null != mCameraDevice) {
+            if (mCameraDevice != null) {
                 mCameraDevice.close();
                 mCameraDevice = null;
             }
-            if (null != mImageReader) {
+            if (mImageReader != null) {
                 mImageReader.close();
                 mImageReader = null;
             }
@@ -368,31 +321,31 @@ public class CameraUtils {
     @RequiresPermission(Manifest.permission.CAMERA)
     private void openCamera(int width, int height) {
         setUpCameraOutputs(width, height);
+        configureTransform(width, height);
         try {
             if (!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
                 throw new RuntimeException("Time out waiting to lock camera opening.");
             }
             manager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);
 
-            handler.postDelayed(new Runnable() {
-                public void run() {
-                    new Thread(() -> takePicture()).start();
-
-                    handler.postDelayed(this, 1000);
-                }
-            }, 1000);
-        } catch (CameraAccessException e) {
+            handler.postDelayed(this::takePicture, 1000);
+        } catch (Exception e) {
             e.printStackTrace();
-        } catch (InterruptedException e) {
-            throw new RuntimeException("Interrupted while trying to lock camera opening.", e);
         }
+    }
+
+    public void takePicture() {
+        new Thread(this::captureStillPicture).start();
+    }
+
+    public ImageReader getImageReader() {
+        return this.mImageReader;
     }
 
     private void setUpCameraOutputs(int width, int height) {
         try {
             for (String cameraId : manager.getCameraIdList()) {
-                CameraCharacteristics characteristics
-                        = manager.getCameraCharacteristics(cameraId);
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
 
                 // We don't use a front facing camera in this sample.
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
@@ -400,27 +353,25 @@ public class CameraUtils {
                     continue;
                 }
 
-                StreamConfigurationMap map = characteristics.get(
-                        CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                 if (map == null) {
                     continue;
                 }
 
                 // For still image captures, we use the largest available size.
-                Size largest = Collections.max(
-                        Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
-                        new CompareSizesByArea());
-                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                        ImageFormat.JPEG, /*maxImages*/2);
-                mImageReader.setOnImageAvailableListener(
-                        mOnImageAvailableListener, mBackgroundHandler);
+                Size largest = Collections.max(Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)), new CompareSizesByArea());
+                float ratio = ((float) largest.getWidth()) / 256;
+                largest = new Size((int) (((float) largest.getHeight()) * ratio), 256);
+//                Size largest = new Size(256, 256);
+                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(), ImageFormat.JPEG, 10);
+                mImageReader.setOnImageAvailableListener(mOnImageAvailableListener, mBackgroundHandler);
 
                 Point displaySize = new Point();
                 displaySupplier.get().getSize(displaySize);
-                int rotatedPreviewWidth = height;
-                int rotatedPreviewHeight = width;
-                int maxPreviewWidth = displaySize.y;
-                int maxPreviewHeight = displaySize.x;
+                int rotatedPreviewWidth = width;
+                int rotatedPreviewHeight = height;
+                int maxPreviewWidth = displaySize.x;
+                int maxPreviewHeight = displaySize.y;
 
                 if (maxPreviewWidth > MAX_PREVIEW_WIDTH) {
                     maxPreviewWidth = MAX_PREVIEW_WIDTH;
@@ -430,15 +381,13 @@ public class CameraUtils {
                     maxPreviewHeight = MAX_PREVIEW_HEIGHT;
                 }
 
-                // Danger, W.R.! Attempting to use too large a preview size could  exceed the camera
-                // bus' bandwidth limitation, resulting in gorgeous previews but the storage of
-                // garbage capture data.
-                mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
-                        rotatedPreviewWidth, rotatedPreviewHeight, maxPreviewWidth,
-                        maxPreviewHeight, largest);
-                mTextureView.setAspectRatio(mPreviewSize.getWidth(), mPreviewSize.getHeight());
+//                mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
+//                        rotatedPreviewWidth, rotatedPreviewHeight, maxPreviewWidth,
+//                        maxPreviewHeight, largest);
+                mPreviewSize = largest;
+                textureViewSupplier.get().setAspectRatio(mPreviewSize.getWidth(), mPreviewSize.getHeight());
 
-                mCameraId = cameraId;
+//                mCameraId = cameraId;
                 return;
             }
         } catch (Exception e) {
@@ -446,26 +395,45 @@ public class CameraUtils {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    @RequiresPermission(Manifest.permission.CAMERA)
+    public void init() {
+        AutoFitTextureView textureView = textureViewSupplier.get();
+        if (textureView.isAvailable()) {
+            openCamera(textureView.getWidth(), textureView.getHeight());
+        } else {
+            textureView.setSurfaceTextureListener(mSurfaceTextureListener);
+        }
+    }
+
+    public File getFile() {
+        return file;
+    }
+
     private static class ImageSaver implements Runnable {
 
         private final Image mImage;
         private final File mFile;
+        private Runnable captureCompleted;
 
-        public ImageSaver(Image image, File file) {
+        public ImageSaver(Image image, File file, Runnable captureCompleted) {
             mImage = image;
             mFile = file;
+            this.captureCompleted = captureCompleted;
         }
 
         @Override
         public void run() {
-            ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
+            System.out.println(mFile.getAbsolutePath());
+
             FileOutputStream output = null;
             try {
-                output = new FileOutputStream(mFile);
+                ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
+                byte[] bytes = new byte[buffer.remaining()];
+                buffer.get(bytes);
+                output = new FileOutputStream(mFile);//.getAbsolutePath() + (Math.round(Math.random() * 1000)));
                 output.write(bytes);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 e.printStackTrace();
             } finally {
                 mImage.close();
@@ -476,6 +444,7 @@ public class CameraUtils {
                         e.printStackTrace();
                     }
                 }
+                captureCompleted.run();
             }
         }
 
